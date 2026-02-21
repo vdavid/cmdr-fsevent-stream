@@ -8,12 +8,12 @@ use log::info;
 #[cfg(feature = "tokio")]
 use tokio1 as tokio;
 
-use fsevent_stream::ffi::{
+use cmdr_fsevent_stream::ffi::{
     kFSEventStreamCreateFlagFileEvents, kFSEventStreamCreateFlagNoDefer,
     kFSEventStreamCreateFlagUseCFTypes, kFSEventStreamCreateFlagUseExtendedData,
     kFSEventStreamEventIdSinceNow,
 };
-use fsevent_stream::stream::create_event_stream;
+use cmdr_fsevent_stream::stream::create_event_stream;
 
 #[cfg(feature = "tokio")]
 #[tokio::main]

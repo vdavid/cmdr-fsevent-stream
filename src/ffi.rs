@@ -187,7 +187,7 @@ impl SysFSEventStream {
             .into_iter()
             .map(|item| str_path_to_cfstring_ref(item.as_ref()))
             .collect::<Result<_, _>>()?;
-        let cf_path_array = CFArray::from_CFTypes(&*cf_paths);
+        let cf_path_array = CFArray::from_CFTypes(&cf_paths);
         Ok(Self(unsafe {
             FSEventStreamCreate(
                 kCFAllocatorDefault,
@@ -203,12 +203,16 @@ impl SysFSEventStream {
     pub fn show(&mut self) {
         unsafe { FSEventStreamShow(self.0) }
     }
-    pub fn schedule(&mut self, run_loop: &CFRunLoop, run_loop_mode: CFStringRef) {
+    /// # Safety
+    /// `run_loop_mode` must be a valid `CFStringRef` (for example, `kCFRunLoopDefaultMode`).
+    pub unsafe fn schedule(&mut self, run_loop: &CFRunLoop, run_loop_mode: CFStringRef) {
         unsafe {
             FSEventStreamScheduleWithRunLoop(self.0, run_loop.as_concrete_TypeRef(), run_loop_mode);
         }
     }
-    pub fn unschedule(&mut self, run_loop: &CFRunLoop, run_loop_mode: CFStringRef) {
+    /// # Safety
+    /// `run_loop_mode` must be a valid `CFStringRef` (for example, `kCFRunLoopDefaultMode`).
+    pub unsafe fn unschedule(&mut self, run_loop: &CFRunLoop, run_loop_mode: CFStringRef) {
         unsafe {
             FSEventStreamUnscheduleFromRunLoop(
                 self.0,

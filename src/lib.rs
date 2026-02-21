@@ -15,12 +15,12 @@
 //! use std::path::Path;
 //! use std::time::Duration;
 //!
-//! use fsevent_stream::ffi::{
+//! use cmdr_fsevent_stream::ffi::{
 //!     kFSEventStreamCreateFlagFileEvents, kFSEventStreamCreateFlagNoDefer,
 //!     kFSEventStreamCreateFlagUseCFTypes, kFSEventStreamCreateFlagUseExtendedData,
 //!     kFSEventStreamEventIdSinceNow,
 //! };
-//! use fsevent_stream::stream::create_event_stream;
+//! use cmdr_fsevent_stream::stream::create_event_stream;
 //! use futures_util::StreamExt;
 //! # #[cfg(feature = "tokio")]
 //! # use tokio1 as tokio;

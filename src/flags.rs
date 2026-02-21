@@ -6,6 +6,7 @@ use crate::ffi;
 
 bitflags::bitflags! {
     /// Known `FSEvents` event flags.
+    #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
     #[repr(C)]
     pub struct StreamFlags: u32 {
         const NONE = ffi::kFSEventStreamEventFlagNone;

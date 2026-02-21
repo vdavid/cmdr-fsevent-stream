@@ -229,7 +229,8 @@ pub fn create_event_stream<P: AsRef<Path>>(
 
         let current_runloop = CFRunLoop::get_current();
 
-        stream.schedule(&current_runloop, unsafe { kCFRunLoopDefaultMode });
+        // Safety: kCFRunLoopDefaultMode is a valid static CFStringRef from CoreFoundation.
+        unsafe { stream.schedule(&current_runloop, kCFRunLoopDefaultMode) };
         stream.start();
 
         // the calling to CFRunLoopRun will be terminated by CFRunLoopStop call in drop()

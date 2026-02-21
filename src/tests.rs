@@ -11,7 +11,7 @@ use std::time::Duration;
 
 #[cfg(feature = "async-std")]
 use async_std1 as async_std;
-use futures_util::stream::{FuturesUnordered, StreamExt};
+use futures_util::stream::StreamExt;
 use once_cell::sync::Lazy;
 use tempfile::tempdir;
 #[cfg(feature = "tokio")]
@@ -113,32 +113,32 @@ async fn must_receive_fs_events() {
     // Acquire the lock so that runloop created in this test won't affect others.
     let _guard = TEST_PARALLEL_LOCK.lock().await;
 
+    // Run sequentially to avoid runloop contention between concurrent FSEvents streams,
+    // which causes directory-level events to be delivered instead of file-level events on
+    // macOS Sequoia.
     let ci = option_env!("CI").is_some();
-    let futs: FuturesUnordered<_> = [
-        must_receive_fs_events_impl(
-            kFSEventStreamCreateFlagFileEvents
-                | kFSEventStreamCreateFlagUseCFTypes
-                | kFSEventStreamCreateFlagUseExtendedData,
-            !ci,
-            !ci,
-        ),
-        must_receive_fs_events_impl(
-            kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagUseCFTypes,
-            false,
-            !ci,
-        ),
-        must_receive_fs_events_impl(kFSEventStreamCreateFlagFileEvents, false, !ci),
-        must_receive_fs_events_impl(
-            kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagUseExtendedData,
-            false,
-            false,
-        ),
-        must_receive_fs_events_impl(kFSEventStreamCreateFlagUseCFTypes, false, false),
-    ]
-    .into_iter()
-    .collect();
-
-    assert_eq!(futs.collect::<Vec<_>>().await.len(), 5);
+    must_receive_fs_events_impl(
+        kFSEventStreamCreateFlagFileEvents
+            | kFSEventStreamCreateFlagUseCFTypes
+            | kFSEventStreamCreateFlagUseExtendedData,
+        !ci,
+        !ci,
+    )
+    .await;
+    must_receive_fs_events_impl(
+        kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagUseCFTypes,
+        false,
+        !ci,
+    )
+    .await;
+    must_receive_fs_events_impl(kFSEventStreamCreateFlagFileEvents, false, !ci).await;
+    must_receive_fs_events_impl(
+        kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagUseExtendedData,
+        false,
+        false,
+    )
+    .await;
+    must_receive_fs_events_impl(kFSEventStreamCreateFlagUseCFTypes, false, false).await;
 }
 
 async fn must_receive_fs_events_impl(
@@ -176,9 +176,12 @@ async fn must_receive_fs_events_impl(
     // First we create a file.
     let f = File::create(&test_file).expect("to be created");
     let inode = f.metadata().expect("to be fetched").ino() as i64;
-    // Sync so that ITEM_CREATE and ITEM_DELETE events won't be squashed into one.
+    // Sync and wait so that ITEM_CREATE and ITEM_DELETE events won't be coalesced.
+    // On macOS Sequoia, FSEvents needs a brief window between close() and unlink() to
+    // deliver separate events; without this, rapid create+delete merges into a single event.
     f.sync_all().expect("to succeed");
     drop(f);
+    sleep(Duration::from_millis(200));
     // Now we delete this file.
     fs::remove_file(&test_file).expect("to be removed");
     // Ensure the filesystem is up to date.
@@ -199,28 +202,33 @@ async fn must_receive_fs_events_impl(
             .expect("to complete");
 
     if verify_file_events {
-        // A dir creation event might be recorded so it's ok we receive 2~3 events.
-        assert!(events.len() == 2 || events.len() == 3);
+        // We expect at least a create and a delete event. Additional directory-level events
+        // may be present (macOS Sequoia delivers these alongside file events).
+        assert!(events.len() >= 2, "expected at least 2 events, got {}", events.len());
 
-        // The second last event should be the file creation event.
-        let event_fst = events.get(events.len() - 2).expect("to exist");
-        assert_eq!(event_fst.path.as_path(), test_file.as_path());
+        // Find the file creation event (by path and flags, not position).
+        let create_event = events
+            .iter()
+            .find(|e| {
+                e.path.as_path() == test_file.as_path()
+                    && e.flags.contains(StreamFlags::ITEM_CREATED | StreamFlags::IS_FILE)
+            })
+            .expect("to find file creation event");
         if verify_inode {
-            assert_eq!(event_fst.inode, Some(inode));
+            assert_eq!(create_event.inode, Some(inode));
         }
-        assert!(event_fst
-            .flags
-            .contains(StreamFlags::ITEM_CREATED | StreamFlags::IS_FILE));
 
-        // The last event should be the file deletion event.
-        let event_snd = events.last().expect("to exist");
-        assert_eq!(event_snd.path.as_path(), test_file.as_path());
+        // Find the file deletion event.
+        let remove_event = events
+            .iter()
+            .find(|e| {
+                e.path.as_path() == test_file.as_path()
+                    && e.flags.contains(StreamFlags::ITEM_REMOVED | StreamFlags::IS_FILE)
+            })
+            .expect("to find file removal event");
         if verify_inode {
-            assert_eq!(event_snd.inode, Some(inode));
+            assert_eq!(remove_event.inode, Some(inode));
         }
-        assert!(event_snd
-            .flags
-            .contains(StreamFlags::ITEM_REMOVED | StreamFlags::IS_FILE));
     } else {
         assert!(!events.is_empty());
     }
